@@ -1,18 +1,15 @@
-# File: docker-compose.yml
-# THIS FILE WILL BE OVERWRITTEN BY THE SCRIPT start.sh, DO NOT EDIT MANUALLY
+version: '3.8'
 
 services:
   stolypote:
-    build: 
+    build:
       context: ./stolypote
     container_name: stolypote
     restart: unless-stopped
     networks:
       - hpnet
-    # The stolypote listens on 65111 inside container:
-    # We'll not publish 65111 externally, because Caddy will handle inbound traffic.
     volumes:
-      - ./wordlists:/app/wordlists   # mount host folder as /app/wordlists
+      - ./wordlists:/app/wordlists
 
   caddy:
     image: caddy:latest
@@ -20,17 +17,18 @@ services:
     restart: unless-stopped
     networks:
       - hpnet
-    # The dynamic Caddyfile is generated at ./caddy/Caddyfile:
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-    # Publish all ports from the Caddyfile:
-    # We'll just publish a few common ones by default, or let the script manage it.
-    # If you open random high ports, you might do something like "network_mode: host" or
-    # individually map. For example:
     ports:
       - "80:80"
+      - "8080:8080"
       - "443:443"
-    # Non-root user is used by default in official caddy.
+      - "8443:8443"
+      - "8000:8000"
+      - "9000:9000"
+      - "9090:9090"
+      - "8081:8081"
+      - "5000:5000"
 
 networks:
   hpnet:

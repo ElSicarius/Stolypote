@@ -1,0 +1,43 @@
+{
+    servers {
+        protocols h1 h2 h2c
+    }
+}
+
+login.elsicarius.fr:443, login.elsicarius.fr:8443 {
+    tls admin@login.elsicarius.fr
+    reverse_proxy stolypote:65111
+}
+
+x.elsicarius.fr:443, x.elsicarius.fr:8443 {
+    tls admin@x.elsicarius.fr
+    reverse_proxy stolypote:65111
+}
+
+:80 {
+    reverse_proxy stolypote:65111
+}
+
+:8080 {
+    reverse_proxy stolypote:65111
+}
+
+:8000 {
+    reverse_proxy stolypote:65111
+}
+
+:9000 {
+    reverse_proxy stolypote:65111
+}
+
+:9090 {
+    reverse_proxy stolypote:65111
+}
+
+:8081 {
+    reverse_proxy stolypote:65111
+}
+
+:5000 {
+    reverse_proxy stolypote:65111
+}
