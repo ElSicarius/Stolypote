@@ -31,6 +31,8 @@ apt update
 
 apt install -f docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
+# Consider rebooting the server to make sure everything is working fine
+
 # run as user
 
 git clone https://github.com/ElSicarius/Stolypote

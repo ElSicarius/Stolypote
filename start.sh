@@ -146,14 +146,14 @@ cat > docker-compose.yml <<EOF
 # version: '3.8' -- docker-compose file "version" is obsolete
 
 services:
-  honeypot:
+  stolypote:
     build:
-      context: ./gohoneypot
-    container_name: honeypot
+      context: ./stolypote
+    container_name: stolypote
     restart: unless-stopped
     networks:
       - hpnet
-    # honeypot listens on 65111 inside container
+    # stolypote listens on 65111 inside container
     volumes:
       - ./wordlists:/app/wordlists
 
