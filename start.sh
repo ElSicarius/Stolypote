@@ -143,7 +143,7 @@ echo "[+] Final port list: ${UNIQUE_PORTS[*]}"
 
 # --- Step 1: Generate docker-compose.yml. It has to be dynamic for the range of openned ports ---
 cat > docker-compose.yml <<EOF
-version: '3.8'
+# version: '3.8' -- docker-compose file "version" is obsolete
 
 services:
   honeypot:

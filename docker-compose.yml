@@ -1,6 +1,5 @@
 # File: docker-compose.yml
 # THIS FILE WILL BE OVERWRITTEN BY THE SCRIPT start.sh, DO NOT EDIT MANUALLY
-version: '3.8'
 
 services:
   stolypote:
