@@ -160,7 +160,11 @@ func serveCustomResponse(w http.ResponseWriter, r *http.Request) {
 
 		contentType := mime.TypeByExtension(filepath.Ext(responseFile))
 		if contentType == "" {
-			contentType = "text/plain"
+			contentType = "application/octet-stream"
+		}
+
+		if contentType == "text/plain" {
+			contentType = "text/html"
 		}
 
 		w.Header().Set("Content-Type", contentType)
