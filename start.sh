@@ -5,43 +5,56 @@
 #   - docker-compose.yml (which ports to map for caddy)
 #   - caddy/Caddyfile (which ports to listen on).
 #
-#   Only ports in COMMON_TLS_PORTS[] get TLS (LE or internal).
-#   All other ports are plain HTTP, even if a domain is specified.
+# Port 443 => Let's Encrypt if domain is provided, else internal TLS if no domain.
+# Other "common TLS" ports => always internal TLS.
+# All remaining ports => plain HTTP.
 #
-# USAGE EXAMPLES:
-#   # Single domain, sets TLS on ports 443,8443, but not on 80:
+# EXAMPLES:
+#   # Single domain, 443 => Let's Encrypt, 8443 => internal, 80 => plain
 #   ./start.sh -p "80,443,8443" -d "example.com"
 #
-#   # Multiple domains, sets TLS only on common ports, e.g., 443:
-#   ./start.sh -p "443,8080,9999" -d domain1.com -d domain2.org
+#   # Multiple domains, 443 => LE, 8080 => plain, no domain => internal only if it's 443 or 8443
+#   ./start.sh -p "443,8080,8443" -d domain1.com -d domain2.org
 #
-#   # No domains => internal TLS only on 443,8443, etc. Plain HTTP on everything else.
-#   ./start.sh -p "80,443" 
+#   # If no domain => 443 => internal TLS, 8443 => internal TLS, etc.
+#   ./start.sh -p "80,443,8443"
 #
 
 set -e
 
 PORT_SPEC=""
 PORT_FILE=""
-# We store all domains in an array
 declare -a DOMAINS=()
 
-# Define which ports should use TLS
-COMMON_TLS_PORTS=(443 8443 9443 10443)
+# We define two sets of "TLS" ports:
+#  1) TRUSTED_PORTS -> [443]
+#  2) COMMON_TLS_PORTS -> [8443, 9443, 10443] (example)
+TRUSTED_PORTS=(443)
+COMMON_TLS_PORTS=(8443 9443 10443)
 
 function usage() {
   echo "Usage: $0 [ -p \"port-spec\" | -f <port-file> ] [ -d <domain> (repeatable) ]"
   echo "  -p \"...\"   => comma list or a range (e.g. '80,443' or '3000-3010')"
-  echo "  -f <file>   => file with one port per line (e.g. 'ports/top10.txt')"
+  echo "  -f <file>   => file with one port per line"
   echo "  -d <domain> => e.g. 'example.com' (can be repeated)"
   exit 1
 }
 
-# Check if a port is in COMMON_TLS_PORTS
-function is_common_https_port() {
-  local port="$1"
+# Helpers to see if a port is 443 or in our other TLS list
+function is_trusted_port() {
+  local p="$1"
+  for tport in "${TRUSTED_PORTS[@]}"; do
+    if [[ "$p" == "$tport" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+function is_common_tls_port() {
+  local p="$1"
   for tlsport in "${COMMON_TLS_PORTS[@]}"; do
-    if [[ "$port" == "$tlsport" ]]; then
+    if [[ "$p" == "$tlsport" ]]; then
       return 0
     fi
   done
@@ -85,7 +98,7 @@ fi
 if [[ ${#DOMAINS[@]} -gt 0 ]]; then
   echo "[+] Domains: ${DOMAINS[*]}"
 else
-  echo "[+] No domains specified. We'll do plain HTTP or internal TLS for known TLS ports."
+  echo "[+] No domains specified -> 443 (if used) and other TLS ports => internal certificates."
 fi
 
 # --- Collect ports into an array ---
@@ -169,9 +182,8 @@ services:
     restart: unless-stopped
     networks:
       - hpnet
-    # stolypote listens on 65111 inside container
     volumes:
-      - ./wordlists:/app/wordlists
+      - ./wordlists:/app/wordlists  # honeypot data
 
   caddy:
     image: caddy:latest
@@ -184,7 +196,7 @@ services:
     ports:
 EOF
 
-# For each port, we map HOST:PORT -> caddy:PORT
+# For each port, map HOST:PORT -> caddy:PORT
 for p in "${UNIQUE_PORTS[@]}"; do
   echo "      - \"$p:$p\"" >> docker-compose.yml
 done
@@ -209,27 +221,38 @@ cat > caddy/Caddyfile <<EOF
 }
 EOF
 
-# We'll define site blocks for each domain + each port differently
-# based on whether the port is in the "common TLS" set.
-
 #############################################################
-# 2a) If domains are given
+# If domains are given -> For each domain, for each port:
+#  - if p in TRUSTED_PORTS (443): Let's Encrypt
+#  - if p in COMMON_TLS_PORTS (8443 etc.): internal TLS
+#  - else plain HTTP
 #############################################################
 if [[ ${#DOMAINS[@]} -gt 0 ]]; then
   for domain in "${DOMAINS[@]}"; do
     for p in "${UNIQUE_PORTS[@]}"; do
-      if is_common_https_port "$p"; then
-        # Domain + known HTTPS port => let's encrypt
-        cat >> caddy/Caddyfile <<EOF
+      if is_trusted_port "$p"; then
+        # => Let's Encrypt
+cat >> caddy/Caddyfile <<EOF
 
 ${domain}:${p} {
     tls admin@${domain}
     reverse_proxy stolypote:65111
 }
 EOF
+
+      elif is_common_tls_port "$p"; then
+        # => internal TLS
+cat >> caddy/Caddyfile <<EOF
+
+${domain}:${p} {
+    tls internal
+    reverse_proxy stolypote:65111
+}
+EOF
+
       else
-        # Domain + non-HTTPS port => plain HTTP
-        cat >> caddy/Caddyfile <<EOF
+        # => plain HTTP
+cat >> caddy/Caddyfile <<EOF
 
 ${domain}:${p} {
     reverse_proxy stolypote:65111
@@ -240,13 +263,13 @@ EOF
   done
 
 #############################################################
-# 2b) No domains => fallback for each port
+# If NO domains -> fallback for each port:
+#  - if p in TRUSTED_PORTS or COMMON_TLS_PORTS => internal TLS
+#  - else plain HTTP
 #############################################################
 else
-  # No domains specified
   for p in "${UNIQUE_PORTS[@]}"; do
-    if is_common_https_port "$p"; then
-      # known TLS port => internal TLS
+    if is_trusted_port "$p" || is_common_tls_port "$p"; then
       cat >> caddy/Caddyfile <<EOF
 
 :${p} {
@@ -255,7 +278,6 @@ else
 }
 EOF
     else
-      # plain HTTP
       cat >> caddy/Caddyfile <<EOF
 
 :${p} {
