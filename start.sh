@@ -5,18 +5,31 @@
 #   - docker-compose.yml (which ports to map for caddy)
 #   - caddy/Caddyfile (which ports to listen on).
 #
-# Port 443 => Let's Encrypt if domain is provided, else internal TLS if no domain.
-# Other "common TLS" ports => always internal TLS.
-# All remaining ports => plain HTTP.
+# Behavior:
+#   - If one or more domains are specified:
+#       * For each domain, unify all "TLS" ports (443,8443,9443,10443, etc.) into ONE block with Let’s Encrypt
+#         (443) or the same cert across them all. 
+#       * Everything else is plain HTTP for domain:port.
+#   - If NO domain is given:
+#       * All "TLS" ports are grouped into ONE block with `tls internal`.
+#       * Everything else is plain HTTP.
 #
-# EXAMPLES:
-#   # Single domain, 443 => Let's Encrypt, 8443 => internal, 80 => plain
+# This way:
+#   * We don't define the same domain on multiple ports with different TLS settings,
+#     avoiding "hostname appears in more than one automation policy".
+#   * We can keep 443 and 8443, etc. in the same site block, reusing the same certificate.
+#
+# Examples:
+#   # Single domain, user ports 80,443,8443 => unify 443 & 8443 in one block => domain:443,8443
+#   # and 80 => plain
 #   ./start.sh -p "80,443,8443" -d "example.com"
 #
-#   # Multiple domains, 443 => LE, 8080 => plain, no domain => internal only if it's 443 or 8443
-#   ./start.sh -p "443,8080,8443" -d domain1.com -d domain2.org
+#   # Multiple domains, all TLS ports are grouped for each domain
+#   ./start.sh -p "443,8080,8443,9443" -d domain1.com -d domain2.net
+#     => domain1.com:443,8443,9443 { ... } + domain1.com:8080 { plain }
+#        domain2.net:443,8443,9443 { ... } + domain2.net:8080 { plain }
 #
-#   # If no domain => 443 => internal TLS, 8443 => internal TLS, etc.
+#   # No domain => all TLS ports => single block with `tls internal`, everything else => plain
 #   ./start.sh -p "80,443,8443"
 #
 
@@ -26,11 +39,8 @@ PORT_SPEC=""
 PORT_FILE=""
 declare -a DOMAINS=()
 
-# We define two sets of "TLS" ports:
-#  1) TRUSTED_PORTS -> [443]
-#  2) COMMON_TLS_PORTS -> [8443, 9443, 10443] (example)
-TRUSTED_PORTS=(443)
-COMMON_TLS_PORTS=(8443 9443 10443)
+# Define which ports are "TLS" ports
+ALL_TLS_PORTS=(443 8443 9443 10443)
 
 function usage() {
   echo "Usage: $0 [ -p \"port-spec\" | -f <port-file> ] [ -d <domain> (repeatable) ]"
@@ -38,27 +48,6 @@ function usage() {
   echo "  -f <file>   => file with one port per line"
   echo "  -d <domain> => e.g. 'example.com' (can be repeated)"
   exit 1
-}
-
-# Helpers to see if a port is 443 or in our other TLS list
-function is_trusted_port() {
-  local p="$1"
-  for tport in "${TRUSTED_PORTS[@]}"; do
-    if [[ "$p" == "$tport" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-function is_common_tls_port() {
-  local p="$1"
-  for tlsport in "${COMMON_TLS_PORTS[@]}"; do
-    if [[ "$p" == "$tlsport" ]]; then
-      return 0
-    fi
-  done
-  return 1
 }
 
 # --- Parse arguments ---
@@ -84,12 +73,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Basic validation: must supply either -p or -f
+# Must supply either -p or -f
 if [[ -z "$PORT_SPEC" && -z "$PORT_FILE" ]]; then
   echo "[!] You must provide ports with -p or -f"
   usage
 fi
-
 if [[ -n "$PORT_SPEC" && -n "$PORT_FILE" ]]; then
   echo "[!] Please specify EITHER -p or -f, not both."
   usage
@@ -98,13 +86,13 @@ fi
 if [[ ${#DOMAINS[@]} -gt 0 ]]; then
   echo "[+] Domains: ${DOMAINS[*]}"
 else
-  echo "[+] No domains specified -> 443 (if used) and other TLS ports => internal certificates."
+  echo "[+] No domains specified -> TLS ports => internal cert, rest => plain HTTP."
 fi
 
 # --- Collect ports into an array ---
 declare -a PORT_ARRAY=()
 
-# Helper function to add a single port (validates range 1..65535)
+# Helper: add single port if valid
 function add_port() {
   local p="$1"
   if [[ "$p" =~ ^[0-9]{1,5}$ ]] && (( p>0 && p<=65535 )); then
@@ -122,18 +110,17 @@ if [[ -n "$PORT_FILE" ]]; then
     exit 1
   fi
   while read -r line; do
-    line="$(echo "$line" | xargs)"  # trim
+    line="$(echo "$line" | xargs)" # trim
     [[ -z "$line" ]] && continue
     add_port "$line"
   done < "$PORT_FILE"
 fi
 
-# If user gave a port spec (could be comma-list or range)
+# If user gave a port spec
 if [[ -n "$PORT_SPEC" ]]; then
   echo "[+] Parsing port spec: $PORT_SPEC"
-
-  # If it's a range "start-end"
   if [[ "$PORT_SPEC" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+    # range
     START="${BASH_REMATCH[1]}"
     END="${BASH_REMATCH[2]}"
     if (( START > END )); then
@@ -144,7 +131,7 @@ if [[ -n "$PORT_SPEC" ]]; then
       add_port "$p"
     done
   else
-    # else assume comma-separated or single
+    # comma-separated
     IFS=',' read -ra SPLIT <<< "$PORT_SPEC"
     for p in "${SPLIT[@]}"; do
       p="$(echo "$p" | xargs)"
@@ -153,7 +140,7 @@ if [[ -n "$PORT_SPEC" ]]; then
   fi
 fi
 
-# Remove duplicates
+# Deduplicate
 declare -A SEEN
 UNIQUE_PORTS=()
 for p in "${PORT_ARRAY[@]}"; do
@@ -170,6 +157,25 @@ fi
 
 echo "[+] Final port list: ${UNIQUE_PORTS[*]}"
 
+# Split into TLS_PORTS vs HTTP_PORTS
+declare -a TLS_PORTS=()
+declare -a HTTP_PORTS=()
+
+for p in "${UNIQUE_PORTS[@]}"; do
+  # If p is in ALL_TLS_PORTS
+  for t in "${ALL_TLS_PORTS[@]}"; do
+    if [[ "$p" == "$t" ]]; then
+      TLS_PORTS+=( "$p" )
+      continue 2
+    fi
+  done
+  # else it's an HTTP port
+  HTTP_PORTS+=( "$p" )
+done
+
+echo "[+] TLS ports: ${TLS_PORTS[*]}"
+echo "[+] Plain HTTP ports: ${HTTP_PORTS[*]}"
+
 # --- Step 1: Generate docker-compose.yml ---
 cat > docker-compose.yml <<EOF
 version: '3.8'
@@ -183,7 +189,7 @@ services:
     networks:
       - hpnet
     volumes:
-      - ./wordlists:/app/wordlists  # honeypot data
+      - ./wordlists:/app/wordlists
 
   caddy:
     image: caddy:latest
@@ -196,7 +202,7 @@ services:
     ports:
 EOF
 
-# For each port, map HOST:PORT -> caddy:PORT
+# Map each user port on host to container
 for p in "${UNIQUE_PORTS[@]}"; do
   echo "      - \"$p:$p\"" >> docker-compose.yml
 done
@@ -208,7 +214,7 @@ networks:
     driver: bridge
 EOF
 
-echo "[+] Created docker-compose.yml with mapped ports."
+echo "[+] Created docker-compose.yml."
 
 # --- Step 2: Generate caddy/Caddyfile ---
 mkdir -p caddy
@@ -222,69 +228,64 @@ cat > caddy/Caddyfile <<EOF
 EOF
 
 #############################################################
-# If domains are given -> For each domain, for each port:
-#  - if p in TRUSTED_PORTS (443): Let's Encrypt
-#  - if p in COMMON_TLS_PORTS (8443 etc.): internal TLS
-#  - else plain HTTP
+# If domains -> each domain gets:
+#   domain:TLS_PORTS (all in one line) => LE cert
+#   domain:HTTP_PORT => plain
+# If no domains -> all TLS_PORTS in one single block => internal
+#                + each HTTP_PORT => plain
 #############################################################
-if [[ ${#DOMAINS[@]} -gt 0 ]]; then
-  for domain in "${DOMAINS[@]}"; do
-    for p in "${UNIQUE_PORTS[@]}"; do
-      if is_trusted_port "$p"; then
-        # => Let's Encrypt
-cat >> caddy/Caddyfile <<EOF
 
-${domain}:${p} {
+if [[ ${#DOMAINS[@]} -gt 0 ]]; then
+  # We have domains
+  # Build a comma-separated list of TLS ports
+  if [[ ${#TLS_PORTS[@]} -gt 0 ]]; then
+    TLS_JOINED="$(IFS=','; echo "${TLS_PORTS[*]}")"  # e.g. "443,8443,9443"
+  fi
+
+  for domain in "${DOMAINS[@]}"; do
+    # 1) If we have TLS_PORTS => unify them
+    if [[ -n "$TLS_JOINED" ]]; then
+      cat >> caddy/Caddyfile <<EOF
+
+${domain}:${TLS_JOINED} {
     tls admin@${domain}
     reverse_proxy stolypote:65111
 }
 EOF
+    fi
 
-      elif is_common_tls_port "$p"; then
-        # => internal TLS
-cat >> caddy/Caddyfile <<EOF
-
-${domain}:${p} {
-    tls internal
-    reverse_proxy stolypote:65111
-}
-EOF
-
-      else
-        # => plain HTTP
+    # 2) For each plain HTTP port
+    for p in "${HTTP_PORTS[@]}"; do
 cat >> caddy/Caddyfile <<EOF
 
 ${domain}:${p} {
     reverse_proxy stolypote:65111
 }
 EOF
-      fi
     done
   done
 
-#############################################################
-# If NO domains -> fallback for each port:
-#  - if p in TRUSTED_PORTS or COMMON_TLS_PORTS => internal TLS
-#  - else plain HTTP
-#############################################################
 else
-  for p in "${UNIQUE_PORTS[@]}"; do
-    if is_trusted_port "$p" || is_common_tls_port "$p"; then
-      cat >> caddy/Caddyfile <<EOF
+  # No domains => unify all TLS ports as :443,8443,9443 => internal
+  if [[ ${#TLS_PORTS[@]} -gt 0 ]]; then
+    TLS_JOINED="$(IFS=','; echo "${TLS_PORTS[*]}")"
+    cat >> caddy/Caddyfile <<EOF
 
-:${p} {
+:${TLS_JOINED} {
     tls internal
     reverse_proxy stolypote:65111
 }
 EOF
-    else
-      cat >> caddy/Caddyfile <<EOF
+  fi
+
+  # For each plain HTTP port
+  for p in "${HTTP_PORTS[@]}"; do
+cat >> caddy/Caddyfile <<EOF
 
 :${p} {
     reverse_proxy stolypote:65111
 }
 EOF
-    fi
   done
 fi
 
@@ -297,4 +298,4 @@ docker compose build --no-cache
 echo "[+] Starting containers..."
 docker compose up -d
 
-echo "[+] Done. Use 'docker compose logs -f' to follow logs."
+echo "[+] Done. Use 'docker compose logs -f' to follow the logs."
