@@ -101,6 +101,9 @@ func handleHoneypot(w http.ResponseWriter, r *http.Request) {
 
 // logRequest saves the raw request to a JSON file
 func logRequest(r *http.Request) error {
+
+	// console log the uri + path + query + method + port + protocol
+	fmt.Printf("Inc Request: %s %s %s %s %s\n", r.Method, r.URL.Path, r.URL.RawQuery, r.Proto, r.Host)
 	data := map[string]interface{}{
 		"time":        time.Now().Format(time.RFC3339),
 		"method":      r.Method,
