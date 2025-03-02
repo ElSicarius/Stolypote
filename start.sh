@@ -18,7 +18,7 @@
 #   ./start.sh -f ports/top10.txt -d example.com
 #
 # NOTE:
-#  - If a domain is given, Caddy tries to get real certificates on ports 80/443.
+#  - If a domain is given, Caddy tries to get real certificates on port 443.
 #  - If no domain is given, Caddy uses internal/self-signed cert for any TLS port.
 #
 set -e
@@ -141,9 +141,10 @@ fi
 
 echo "[+] Final port list: ${UNIQUE_PORTS[*]}"
 
-# --- Step 1: Generate docker-compose.yml. It has to be dynamic for the range of openned ports ---
+# --- Step 1: Generate docker-compose.yml. It has to be dynamic for the range of opened ports ---
 cat > docker-compose.yml <<EOF
-# version: '3.8' -- docker-compose file "version" is obsolete
+# version: '3.8' is essentially obsolete, but we keep it for clarity
+version: '3.8'
 
 services:
   stolypote:
@@ -169,7 +170,6 @@ services:
 EOF
 
 # For each port, we map HOST:PORT -> caddy:PORT
-# (Inside the container, caddy listens on the same port, or optionally you can do "80:80", "443:443")
 for p in "${UNIQUE_PORTS[@]}"; do
   echo "      - \"$p:$p\"" >> docker-compose.yml
 done
@@ -194,77 +194,44 @@ cat > caddy/Caddyfile <<EOF
 }
 EOF
 
-# If user specified a domain, handle real certificates for 80/443
-# We'll do a special block for domain:443 + a redirect from domain:80
+# If user specified a domain, handle real certificates for domain:443 only
 if [[ -n "$DOMAIN" ]]; then
   cat >> caddy/Caddyfile <<EOF
 
-# HTTP -> HTTPS redirect for the domain
-:80 {
-    @mydomain host ${DOMAIN}
-    redir @mydomain https://${DOMAIN}{uri}
-    # If something else hits port 80 but not the domain name, let's just pass to honeypot
-    reverse_proxy honeypot:65111
-}
-
 # Let's Encrypt-protected site
 ${DOMAIN}:443 {
-    tls {
-        # By default, caddy uses ACME/Let's Encrypt
-        # If you want DNS or EAB challenge, you'd configure it here
-    }
-    reverse_proxy honeypot:65111
+    tls 
+    reverse_proxy stolypote:65111
 }
 EOF
 fi
 
-# For any other requested ports beyond 80/443, create generic blocks
-# If domain is set and the port is e.g. 8443, we can also do domain:8443 with real certs
+# For any other requested ports, create generic blocks
 for p in "${UNIQUE_PORTS[@]}"; do
-  # If domain was provided, we already handled 80/443 above
-  if [[ "$p" == "80" || "$p" == "443" ]]; then
-    # skip (already done if domain is used)
-    if [[ -z "$DOMAIN" ]]; then
-      # If no domain is provided, we define them as normal blocks
-      if [[ "$p" == "443" ]]; then
-        cat >> caddy/Caddyfile <<EOF
+  # If domain is set and port == 443, skip because we already handled that domain-based block
+  if [[ -n "$DOMAIN" && "$p" == "443" ]]; then
+    continue
+  fi
 
-:${p} {
-    tls internal
-    reverse_proxy honeypot:65111
-}
-EOF
-      else
-        cat >> caddy/Caddyfile <<EOF
-
-:${p} {
-    reverse_proxy honeypot:65111
-}
-EOF
-      fi
-    fi
-  else
-    # For everything else: if domain is given and port is e.g. 8443, we might do domain:8443 with real cert
-    if [[ -n "$DOMAIN" && "$p" == "8443" ]]; then
-      cat >> caddy/Caddyfile <<EOF
+  # If domain is set and the port is e.g. 8443, we can do domain:8443 with real cert
+  if [[ -n "$DOMAIN" && "$p" == "8443" ]]; then
+    cat >> caddy/Caddyfile <<EOF
 
 ${DOMAIN}:${p} {
-    tls {
-        # Let's Encrypt
-    }
-    reverse_proxy honeypot:65111
+    tls
+    reverse_proxy stolypote:65111
 }
 EOF
-    else
-      # fallback: internal cert
-      cat >> caddy/Caddyfile <<EOF
+  else
+    # fallback: internal cert if it's a TLS port, or plain if not
+    # (Caddy won't automatically do TLS unless we say so - let's default to internal TLS for all to gather credentials)
+    cat >> caddy/Caddyfile <<EOF
 
 :${p} {
     tls internal
-    reverse_proxy honeypot:65111
+    reverse_proxy stolypote:65111
 }
 EOF
-    fi
   fi
 done
 
@@ -277,4 +244,4 @@ docker compose build
 echo "[+] Starting containers..."
 docker compose up -d
 
-echo "[+] Done. Use 'docker compose logs -f' to follow the logs."
+echo "[+] Done. Use 'docker compose logs -f' to follow logs."
