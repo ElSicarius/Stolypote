@@ -12,6 +12,10 @@ A stolen/refactored/golang version of laluka's Broneypote https://github.com/lal
 -> Isolate it from anything critical from your network !
 
 ```bash
+# update your ssh port -> don't forget to open it in your firewall
+echo "Port 123456" >> /etc/ssh/sshd_config
+sudo ufw allow 123456
+reboot
 
 # run basic docker install as root
 apt update && apt upgrade -y
