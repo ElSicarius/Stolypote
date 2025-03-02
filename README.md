@@ -38,6 +38,11 @@ apt install -f docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker
 git clone https://github.com/ElSicarius/Stolypote
 cd Stolypote
 
+# make sure the wordlists are writable by the honeypot
+sudo chown -R 100:100 wordlists/
+# make sure the dump folder is writable by the honeypot
+sudo chown -R 100:100 wordlists/dump/
+
 chmod +x start.sh
 
 ```

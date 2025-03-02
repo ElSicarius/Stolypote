@@ -26,7 +26,7 @@ var listenAddr string
 
 // In-container directories (mount "wordlists" from host)
 const (
-	DumpDir                = "dump/http"
+	DumpDir                = "/app/wordlists/dump/http"
 	WordlistDir            = "/app/wordlists"
 	PathsFilename          = "paths-honeypot.txt"
 	UsersFilename          = "users-honeypot.txt"
