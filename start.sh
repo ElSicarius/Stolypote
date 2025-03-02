@@ -3,37 +3,49 @@
 # start.sh
 # Dynamically sets up:
 #   - docker-compose.yml (which ports to map for caddy)
-#   - caddy/Caddyfile (which ports to listen on; optionally domain-based TLS)
-# Then builds & starts the Docker Compose stack.
+#   - caddy/Caddyfile (which ports to listen on).
 #
-# USAGE:
-#   ./start.sh -p "80,443,8080" [-d "example.com"]
-#   ./start.sh -p "3000-3010"   [-d "example.com"]
-#   ./start.sh -f ports/top10.txt [-d "example.com"]
+#   Only ports in COMMON_TLS_PORTS[] get TLS (LE or internal).
+#   All other ports are plain HTTP, even if a domain is specified.
 #
-# EXAMPLE:
-#   # from a file
-#   echo "80" > ports/top10.txt
-#   echo "443" >> ports/top10.txt
-#   ./start.sh -f ports/top10.txt -d example.com
+# USAGE EXAMPLES:
+#   # Single domain, sets TLS on ports 443,8443, but not on 80:
+#   ./start.sh -p "80,443,8443" -d "example.com"
 #
-# NOTE:
-#  - If a domain is given, Caddy tries to get real certificates on port 443.
-#  - If no domain is given, Caddy uses internal/self-signed cert for any TLS port.
+#   # Multiple domains, sets TLS only on common ports, e.g., 443:
+#   ./start.sh -p "443,8080,9999" -d domain1.com -d domain2.org
 #
+#   # No domains => internal TLS only on 443,8443, etc. Plain HTTP on everything else.
+#   ./start.sh -p "80,443" 
+#
+
 set -e
 
-# Default/empty
 PORT_SPEC=""
 PORT_FILE=""
-DOMAIN=""
+# We store all domains in an array
+declare -a DOMAINS=()
+
+# Define which ports should use TLS
+COMMON_TLS_PORTS=(443 8443 9443 10443)
 
 function usage() {
-  echo "Usage: $0 [ -p \"port-spec\" | -f <port-file> ] [ -d <domain> ]"
+  echo "Usage: $0 [ -p \"port-spec\" | -f <port-file> ] [ -d <domain> (repeatable) ]"
   echo "  -p \"...\"   => comma list or a range (e.g. '80,443' or '3000-3010')"
   echo "  -f <file>   => file with one port per line (e.g. 'ports/top10.txt')"
-  echo "  -d <domain> => e.g. 'example.com'"
+  echo "  -d <domain> => e.g. 'example.com' (can be repeated)"
   exit 1
+}
+
+# Check if a port is in COMMON_TLS_PORTS
+function is_common_https_port() {
+  local port="$1"
+  for tlsport in "${COMMON_TLS_PORTS[@]}"; do
+    if [[ "$port" == "$tlsport" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # --- Parse arguments ---
@@ -49,7 +61,7 @@ while [[ $# -gt 0 ]]; do
       shift; shift
       ;;
     -d|--domain)
-      DOMAIN="$2"
+      DOMAINS+=( "$2" )
       shift; shift
       ;;
     *)
@@ -59,7 +71,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Basic validation: user must supply either -p or -f
+# Basic validation: must supply either -p or -f
 if [[ -z "$PORT_SPEC" && -z "$PORT_FILE" ]]; then
   echo "[!] You must provide ports with -p or -f"
   usage
@@ -70,7 +82,11 @@ if [[ -n "$PORT_SPEC" && -n "$PORT_FILE" ]]; then
   usage
 fi
 
-echo "[+] Domain: ${DOMAIN:-'(none)'}"
+if [[ ${#DOMAINS[@]} -gt 0 ]]; then
+  echo "[+] Domains: ${DOMAINS[*]}"
+else
+  echo "[+] No domains specified. We'll do plain HTTP or internal TLS for known TLS ports."
+fi
 
 # --- Collect ports into an array ---
 declare -a PORT_ARRAY=()
@@ -141,9 +157,8 @@ fi
 
 echo "[+] Final port list: ${UNIQUE_PORTS[*]}"
 
-# --- Step 1: Generate docker-compose.yml. It has to be dynamic for the range of opened ports ---
+# --- Step 1: Generate docker-compose.yml ---
 cat > docker-compose.yml <<EOF
-# version: '3.8' is essentially obsolete, but we keep it for clarity
 version: '3.8'
 
 services:
@@ -194,52 +209,68 @@ cat > caddy/Caddyfile <<EOF
 }
 EOF
 
-# If user specified a domain, handle real certificates for domain:443 only
-if [[ -n "$DOMAIN" ]]; then
-  cat >> caddy/Caddyfile <<EOF
+# We'll define site blocks for each domain + each port differently
+# based on whether the port is in the "common TLS" set.
 
-# Let's Encrypt-protected site
-${DOMAIN}:443 {
-    tls admin@${DOMAIN}
+#############################################################
+# 2a) If domains are given
+#############################################################
+if [[ ${#DOMAINS[@]} -gt 0 ]]; then
+  for domain in "${DOMAINS[@]}"; do
+    for p in "${UNIQUE_PORTS[@]}"; do
+      if is_common_https_port "$p"; then
+        # Domain + known HTTPS port => let's encrypt
+        cat >> caddy/Caddyfile <<EOF
+
+${domain}:${p} {
+    tls admin@${domain}
     reverse_proxy stolypote:65111
 }
 EOF
-fi
+      else
+        # Domain + non-HTTPS port => plain HTTP
+        cat >> caddy/Caddyfile <<EOF
 
-# For any other requested ports, create generic blocks
-for p in "${UNIQUE_PORTS[@]}"; do
-  # If domain is set and port == 443, skip because we already handled that domain-based block
-  if [[ -n "$DOMAIN" && "$p" == "443" ]]; then
-    continue
-  fi
-
-  # If domain is set and the port is e.g. 8443, we can do domain:8443 with real cert
-  if [[ -n "$DOMAIN" && "$p" == "8443" ]]; then
-    cat >> caddy/Caddyfile <<EOF
-
-${DOMAIN}:${p} {
-    tls admin@${DOMAIN}
+${domain}:${p} {
     reverse_proxy stolypote:65111
 }
 EOF
-  else
-    # fallback: internal cert if it's a TLS port, or plain if not
-    # (Caddy won't automatically do TLS unless we say so - let's default to internal TLS for all to gather credentials)
-    cat >> caddy/Caddyfile <<EOF
+      fi
+    done
+  done
+
+#############################################################
+# 2b) No domains => fallback for each port
+#############################################################
+else
+  # No domains specified
+  for p in "${UNIQUE_PORTS[@]}"; do
+    if is_common_https_port "$p"; then
+      # known TLS port => internal TLS
+      cat >> caddy/Caddyfile <<EOF
 
 :${p} {
     tls internal
     reverse_proxy stolypote:65111
 }
 EOF
-  fi
-done
+    else
+      # plain HTTP
+      cat >> caddy/Caddyfile <<EOF
+
+:${p} {
+    reverse_proxy stolypote:65111
+}
+EOF
+    fi
+  done
+fi
 
 echo "[+] Created caddy/Caddyfile."
 
 # --- Step 3: Build & run ---
 echo "[+] Building Docker images..."
-docker compose build --no-cache
+docker compose build
 
 echo "[+] Starting containers..."
 docker compose up -d
