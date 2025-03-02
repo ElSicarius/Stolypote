@@ -18,7 +18,7 @@ RUN addgroup -S stolypote && adduser -S stolypote -G stolypote
 
 WORKDIR /app
 RUN mkdir -p /app/dump/http && mkdir -p /app/wordlists
-VOLUME ["/app/wordlists"]
+VOLUME ["/app/wordlists" "/app/config" "/app/responses"]
 
 COPY --from=builder /stolypote /app/stolypote
 
