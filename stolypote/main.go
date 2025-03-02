@@ -149,7 +149,7 @@ func serveCustomResponse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if responseFile, exists := responseMap[fileKey]; exists {
-		fullPath := filepath.Join(WordlistDir, responseFile)
+		fullPath := filepath.Join(ResponsesDir, responseFile)
 
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
