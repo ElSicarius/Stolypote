@@ -296,9 +296,9 @@ echo "[+] Created caddy/Caddyfile."
 
 # --- Step 3: Build & run ---
 echo "[+] Building Docker images..."
-#docker compose build --no-cache
+docker compose build --no-cache
 
 echo "[+] Starting containers..."
-#docker compose up -d
+docker compose up -d
 
 echo "[+] Done. Use 'docker compose logs -f' to watch logs."
