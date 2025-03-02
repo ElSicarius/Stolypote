@@ -1,0 +1,10 @@
+test
+
+
+Checkout my credentials:
+
+- Username: admin
+- Password: admin
+
+Token: AKAIAI7XQW3X2J3ZUZ7A
+SECRET: 7vZ5j7ZUZ7A

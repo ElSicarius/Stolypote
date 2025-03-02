@@ -1,0 +1,10 @@
+
+
+<html>
+<head>
+<title>PHP Test</title>
+</head>
+<body>
+    Fatal error: Call to undefined function undefined_func() in /var/www/html/index.php on line 42
+</body>
+</html>

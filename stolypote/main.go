@@ -28,6 +28,8 @@ var listenAddr string
 const (
 	DumpDir                = "/app/wordlists/dump/http"
 	WordlistDir            = "/app/wordlists"
+	ResponsesDir           = "/app/responses"
+	ResponseFile           = "/app/config/responses.txt" // Response mappings
 	PathsFilename          = "paths-honeypot.txt"
 	UsersFilename          = "users-honeypot.txt"
 	PasswordsFilename      = "passwords-honeypot.txt"
@@ -44,6 +46,7 @@ var (
 	passwordsSet      = map[string]bool{}
 	combosSet         = map[string]bool{}
 	authorizationsSet = map[string]bool{}
+	responseMap       = map[string]string{} // Extension -> Response File Mapping
 	parametersSet     = map[string]bool{}
 
 	mu sync.Mutex
@@ -65,6 +68,9 @@ func main() {
 	if err := os.MkdirAll(WordlistDir, 0755); err != nil {
 		log.Fatalf("Cannot create wordlist directory: %v", err)
 	}
+
+	// Preload all the response files
+	loadResponseMappings()
 
 	// Preload existing wordlists to avoid duplicates
 	preloadWordlists()
@@ -93,7 +99,79 @@ func handleHoneypot(w http.ResponseWriter, r *http.Request) {
 	// Extract interesting data (paths, credentials, param keys, etc.)
 	extractData(r)
 
-	// Minimal response
+	serveCustomResponse(w, r)
+}
+
+// Loads response mappings from responses.txt
+func loadResponseMappings() {
+	f, err := os.Open(ResponseFile)
+	if err != nil {
+		log.Printf("[!] No response mapping file found, serving only 'ok' response.")
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			log.Printf("[!] Invalid format in responses.txt: %s", line)
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		// open the corresponding file and if it exists, set it's content
+		fullPath := filepath.Join(ResponsesDir, value)
+		if _, err := os.Stat(fullPath); err != nil {
+			log.Printf("[!] Response file %s does not exist", fullPath)
+			continue
+		}
+
+		responseMap[key] = value
+	}
+	log.Printf("[+] Loaded response mappings: %+v", responseMap)
+}
+
+// Serves custom response if matched
+func serveCustomResponse(w http.ResponseWriter, r *http.Request) {
+	ext := strings.TrimPrefix(path.Ext(r.URL.Path), ".")
+	fileKey := ext
+
+	if r.URL.Path == "/robots.txt" {
+		fileKey = "robots.txt"
+	}
+
+	if responseFile, exists := responseMap[fileKey]; exists {
+		fullPath := filepath.Join(WordlistDir, responseFile)
+
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			log.Printf("[!] Error reading response file %s: %v", fullPath, err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		contentType := mime.TypeByExtension(filepath.Ext(responseFile))
+		if contentType == "" {
+			contentType = "text/plain"
+		}
+
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+
+		log.Printf("[+] Served custom response for %s (%s)", r.URL.Path, responseFile)
+		return
+	}
+
+	// Default fallback response
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok"))
@@ -103,7 +181,7 @@ func handleHoneypot(w http.ResponseWriter, r *http.Request) {
 func logRequest(r *http.Request) error {
 
 	// console log the uri + path + query + method + port + protocol
-	fmt.Printf("Inc Request: %s %s %s %s %s\n", r.Method, r.URL.Path, r.URL.RawQuery, r.Proto, r.Host)
+	fmt.Printf("Inc Request: M:%s P:%s Q:%s Proto:%s Against:%s\n", r.Method, r.URL.Path, r.URL.RawQuery, r.Proto, r.Host)
 	data := map[string]interface{}{
 		"time":        time.Now().Format(time.RFC3339),
 		"method":      r.Method,

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>JSP </title>
+</head>
+
+<body>
+    <h1>HTTP Status 500 – Internal Server Error</h1>
+    <p><b>Type</b> Status Report</p>
+    <p><b>Message</b> An exception occurred processing JSP page /index.jsp at line 42</p>
+    <p><b>Description</b> The server encountered an unexpected condition that prevented it from fulfilling the request.</p>
+    <p><b>Exception</b></p>
+    <pre>org.apache.jasper.JasperException: An exception occurred processing JSP page /index.jsp at line 42
+39:         <h1>HTTP Status 500 – Internal Server Error</h1>
+40:         <p><b>Type</b> Status Report</p>
+41:         <p><b>Message</b> An exception occurred processing JSP page /index.jsp at line 42</p>
+42:         <p><b>Description</b> The server encountered an unexpected condition that prevented it from fulfilling the request.</p>
+43:         <p><b>Exception</b></p>
+44:         <pre>org.apache.jasper.JasperException: An exception occurred processing JSP page /index.jsp at line 42
+45:
+</pre>
+    </pre>
+    <p><b>Root Cause</b></p>
+    <pre>java.lang.NullPointerException
+    com.example.myproject.Book.getTitle(Book.java:16)
+    org.apache.jsp.WEB_002dINF.views.book_002ddetails_jsp._jspService(book_002ddetails_jsp.java:94)
+    org.apache.jasper.runtime.HttpJspBase.service(HttpJspBase.java:70)
+    javax.servlet.http.HttpServlet.service(HttpServlet.java:741)
+    org.apache.jasper.servlet.JspServletWrapper.service(JspServletWrapper.java:444)
+    org.apache.jasper.servlet.JspServlet.serviceJspFile(JspServlet.java:386)
+    org.apache.jasper.servlet.JspServlet.service(JspServlet.java:330)
+    javax.servlet.http.HttpServlet.service(HttpServlet.java:741)
+    org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:53)
+</pre>
+    <p><b>Note</b> The full stack trace of the root cause is available in the server logs.</p>
+    <hr>
+    <h3>Apache Tomcat/9.0.12</h3>
+    
+    </body>
