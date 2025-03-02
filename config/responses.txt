@@ -51,4 +51,4 @@ mov=dummy.mov
 mpg=dummy.mpg
 mpeg=dummy.mpeg
 swf=dummy.swf
-
+robots=robots.txt

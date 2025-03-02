@@ -145,7 +145,7 @@ func serveCustomResponse(w http.ResponseWriter, r *http.Request) {
 	fileKey := ext
 
 	if r.URL.Path == "/robots.txt" {
-		fileKey = "robots.txt"
+		fileKey = "robots"
 	}
 
 	if responseFile, exists := responseMap[fileKey]; exists {
@@ -160,7 +160,7 @@ func serveCustomResponse(w http.ResponseWriter, r *http.Request) {
 
 		contentType := mime.TypeByExtension(filepath.Ext(responseFile))
 		if contentType == "" {
-			contentType = "application/octet-stream"
+			contentType = "test/html"
 		}
 
 		if contentType == "text/plain" {
