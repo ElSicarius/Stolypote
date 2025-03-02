@@ -200,7 +200,7 @@ if [[ -n "$DOMAIN" ]]; then
 
 # Let's Encrypt-protected site
 ${DOMAIN}:443 {
-    tls 
+    tls admin@${DOMAIN}
     reverse_proxy stolypote:65111
 }
 EOF
@@ -218,7 +218,7 @@ for p in "${UNIQUE_PORTS[@]}"; do
     cat >> caddy/Caddyfile <<EOF
 
 ${DOMAIN}:${p} {
-    tls
+    tls admin@${DOMAIN}
     reverse_proxy stolypote:65111
 }
 EOF
@@ -239,7 +239,7 @@ echo "[+] Created caddy/Caddyfile."
 
 # --- Step 3: Build & run ---
 echo "[+] Building Docker images..."
-docker compose build
+docker compose build --no-cache
 
 echo "[+] Starting containers..."
 docker compose up -d
