@@ -1,0 +1,20 @@
+
+<!DOCTYPE root-element>
+<root-element>
+    <user>
+        <id>1</id>
+        <name>John Doe</name>
+        <email>
+            <address>
+                <type>work</type>
+                <value>
+                    <text>
+                        <value> test@example.com </value>
+                    </text>
+                </value>
+            </address>
+        </email>
+    </user>
+    
+
+</root-element>

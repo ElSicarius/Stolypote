@@ -1,9 +1,9 @@
-php=php.txt
-asp=aspx.txt
-aspx=aspx.txt
-jsp=jsp.txt
-do=do.txt
-action=action.txt
+php=php.html
+asp=aspx.html
+aspx=aspx.html
+jsp=jsp.html
+do=do.html
+action=action.html
 txt=dummy.txt
 xml=dummy.xml
 js=dummy.js
