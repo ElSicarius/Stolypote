@@ -192,6 +192,8 @@ services:
       - hpnet
     volumes:
       - ./wordlists:/app/wordlists
+      - ./responses:/app/responses
+      - ./config:/app/config
 
   caddy:
     image: caddy:latest
