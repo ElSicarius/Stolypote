@@ -7,29 +7,28 @@
 #
 # Behavior:
 #   - If one or more domains are specified:
-#       * For each domain, unify all "TLS" ports (443,8443,9443,10443, etc.) into ONE block with Let’s Encrypt
-#         (443) or the same cert across them all. 
-#       * Everything else is plain HTTP for domain:port.
+#       * For each domain, unify all "TLS" ports (443,8443,9443,10443, etc.) into ONE block (space-separated addresses),
+#         using the same Let's Encrypt certificate (ACME).
+#       * All remaining ports become plain HTTP, domain:port.
 #   - If NO domain is given:
-#       * All "TLS" ports are grouped into ONE block with `tls internal`.
-#       * Everything else is plain HTTP.
+#       * All TLS ports go into one block with `tls internal`, e.g. `:443 :8443 :9443`.
+#       * All other ports are plain HTTP.
 #
-# This way:
-#   * We don't define the same domain on multiple ports with different TLS settings,
-#     avoiding "hostname appears in more than one automation policy".
-#   * We can keep 443 and 8443, etc. in the same site block, reusing the same certificate.
+# This way there's only one site block for each domain's TLS ports, avoiding
+# "hostname appears in more than one automation policy" and also avoiding
+# commas in site addresses.
 #
-# Examples:
-#   # Single domain, user ports 80,443,8443 => unify 443 & 8443 in one block => domain:443,8443
-#   # and 80 => plain
-#   ./start.sh -p "80,443,8443" -d "example.com"
+# EXAMPLES:
+#   # Single domain, user ports: 80,443,8443 => unify 443 & 8443:
+#   # "login.secarius.fr:443 login.secarius.fr:8443 { ... }"
+#   ./start.sh -p "80,443,8443" -d "login.secarius.fr"
 #
-#   # Multiple domains, all TLS ports are grouped for each domain
-#   ./start.sh -p "443,8080,8443,9443" -d domain1.com -d domain2.net
-#     => domain1.com:443,8443,9443 { ... } + domain1.com:8080 { plain }
-#        domain2.net:443,8443,9443 { ... } + domain2.net:8080 { plain }
+#   # Multiple domains, ports: 443,8080,8443 => domain1 + domain2 each get:
+#   # "domain1.com:443 domain1.com:8443 { tls ... }" + domain1.com:8080 { plain }
+#   # "domain2.org:443 domain2.org:8443 { tls ... }" + domain2.org:8080 { plain }
+#   ./start.sh -p "443,8080,8443" -d domain1.com -d domain2.org
 #
-#   # No domain => all TLS ports => single block with `tls internal`, everything else => plain
+#   # No domains => all TLS ports => internal, all other => plain
 #   ./start.sh -p "80,443,8443"
 #
 
@@ -73,7 +72,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Must supply either -p or -f
+# Must provide either -p or -f
 if [[ -z "$PORT_SPEC" && -z "$PORT_FILE" ]]; then
   echo "[!] You must provide ports with -p or -f"
   usage
@@ -86,17 +85,17 @@ fi
 if [[ ${#DOMAINS[@]} -gt 0 ]]; then
   echo "[+] Domains: ${DOMAINS[*]}"
 else
-  echo "[+] No domains specified -> TLS ports => internal cert, rest => plain HTTP."
+  echo "[+] No domains specified -> unify TLS ports with 'tls internal'."
 fi
 
 # --- Collect ports into an array ---
 declare -a PORT_ARRAY=()
 
-# Helper: add single port if valid
+# Helper function to add a single port if valid
 function add_port() {
   local p="$1"
   if [[ "$p" =~ ^[0-9]{1,5}$ ]] && (( p>0 && p<=65535 )); then
-    PORT_ARRAY+=("$p")
+    PORT_ARRAY+=( "$p" )
   else
     echo "[!] Skipping invalid port: $p"
   fi
@@ -110,7 +109,7 @@ if [[ -n "$PORT_FILE" ]]; then
     exit 1
   fi
   while read -r line; do
-    line="$(echo "$line" | xargs)" # trim
+    line="$(echo "$line" | xargs)"  # trim
     [[ -z "$line" ]] && continue
     add_port "$line"
   done < "$PORT_FILE"
@@ -146,7 +145,7 @@ UNIQUE_PORTS=()
 for p in "${PORT_ARRAY[@]}"; do
   if [[ -z "${SEEN[$p]}" ]]; then
     SEEN[$p]=1
-    UNIQUE_PORTS+=("$p")
+    UNIQUE_PORTS+=( "$p" )
   fi
 done
 
@@ -161,20 +160,23 @@ echo "[+] Final port list: ${UNIQUE_PORTS[*]}"
 declare -a TLS_PORTS=()
 declare -a HTTP_PORTS=()
 
+# If a port is in ALL_TLS_PORTS, treat it as TLS, otherwise plain HTTP
 for p in "${UNIQUE_PORTS[@]}"; do
-  # If p is in ALL_TLS_PORTS
+  matched=false
   for t in "${ALL_TLS_PORTS[@]}"; do
     if [[ "$p" == "$t" ]]; then
       TLS_PORTS+=( "$p" )
-      continue 2
+      matched=true
+      break
     fi
   done
-  # else it's an HTTP port
-  HTTP_PORTS+=( "$p" )
+  if [ "$matched" = false ]; then
+    HTTP_PORTS+=( "$p" )
+  fi
 done
 
 echo "[+] TLS ports: ${TLS_PORTS[*]}"
-echo "[+] Plain HTTP ports: ${HTTP_PORTS[*]}"
+echo "[+] HTTP ports: ${HTTP_PORTS[*]}"
 
 # --- Step 1: Generate docker-compose.yml ---
 cat > docker-compose.yml <<EOF
@@ -202,7 +204,6 @@ services:
     ports:
 EOF
 
-# Map each user port on host to container
 for p in "${UNIQUE_PORTS[@]}"; do
   echo "      - \"$p:$p\"" >> docker-compose.yml
 done
@@ -218,7 +219,6 @@ echo "[+] Created docker-compose.yml."
 
 # --- Step 2: Generate caddy/Caddyfile ---
 mkdir -p caddy
-
 cat > caddy/Caddyfile <<EOF
 {
     servers {
@@ -228,33 +228,37 @@ cat > caddy/Caddyfile <<EOF
 EOF
 
 #############################################################
-# If domains -> each domain gets:
-#   domain:TLS_PORTS (all in one line) => LE cert
-#   domain:HTTP_PORT => plain
-# If no domains -> all TLS_PORTS in one single block => internal
-#                + each HTTP_PORT => plain
+# If domains -> for each domain, unify all TLS ports in a single site block (space separated).
+# e.g. "login.secarius.fr:443 login.secarius.fr:8443 { tls admin@login.secarius.fr ... }"
+# Then each HTTP port => "login.secarius.fr:80" plain.
+#
+# If NO domains -> unify all TLS ports in one block with internal TLS, e.g. ":443 :8443 :9443"
+# plus plain for other ports, e.g. ":80" etc.
 #############################################################
 
 if [[ ${#DOMAINS[@]} -gt 0 ]]; then
   # We have domains
-  # Build a comma-separated list of TLS ports
-  if [[ ${#TLS_PORTS[@]} -gt 0 ]]; then
-    TLS_JOINED="$(IFS=','; echo "${TLS_PORTS[*]}")"  # e.g. "443,8443,9443"
-  fi
-
+  # Build a space-separated set of addresses for each domain's TLS ports
   for domain in "${DOMAINS[@]}"; do
-    # 1) If we have TLS_PORTS => unify them
-    if [[ -n "$TLS_JOINED" ]]; then
+    # 1) TLS ports block
+    if [[ ${#TLS_PORTS[@]} -gt 0 ]]; then
+      SITE_TLS_ADDRS=""
+      for p in "${TLS_PORTS[@]}"; do
+        SITE_TLS_ADDRS+="${domain}:${p} "
+      done
+      # Trim
+      SITE_TLS_ADDRS="$(echo "$SITE_TLS_ADDRS" | xargs)"
+
       cat >> caddy/Caddyfile <<EOF
 
-${domain}:${TLS_JOINED} {
+$SITE_TLS_ADDRS {
     tls admin@${domain}
     reverse_proxy stolypote:65111
 }
 EOF
     fi
 
-    # 2) For each plain HTTP port
+    # 2) HTTP ports
     for p in "${HTTP_PORTS[@]}"; do
 cat >> caddy/Caddyfile <<EOF
 
@@ -264,21 +268,25 @@ ${domain}:${p} {
 EOF
     done
   done
-
 else
-  # No domains => unify all TLS ports as :443,8443,9443 => internal
+  # No domains -> unify TLS ports with "tls internal"
   if [[ ${#TLS_PORTS[@]} -gt 0 ]]; then
-    TLS_JOINED="$(IFS=','; echo "${TLS_PORTS[*]}")"
+    SITE_TLS_ADDRS=""
+    for p in "${TLS_PORTS[@]}"; do
+      SITE_TLS_ADDRS+=":${p} "
+    done
+    SITE_TLS_ADDRS="$(echo "$SITE_TLS_ADDRS" | xargs)" # trim
+
     cat >> caddy/Caddyfile <<EOF
 
-:${TLS_JOINED} {
+$SITE_TLS_ADDRS {
     tls internal
     reverse_proxy stolypote:65111
 }
 EOF
   fi
 
-  # For each plain HTTP port
+  # HTTP ports
   for p in "${HTTP_PORTS[@]}"; do
 cat >> caddy/Caddyfile <<EOF
 
@@ -298,4 +306,4 @@ docker compose build --no-cache
 echo "[+] Starting containers..."
 docker compose up -d
 
-echo "[+] Done. Use 'docker compose logs -f' to follow the logs."
+echo "[+] Done. Use 'docker compose logs -f' to watch logs."
