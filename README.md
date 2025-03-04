@@ -67,3 +67,18 @@ Then start everything with your domain name and port ranges:
 ./start.sh -p "20-65534" -d "example.com"
 
 ```
+
+# Outputs
+
+The tool creates his wordlists and logs in the `wordlists` folder.
+The  `wordlists/dump` folder stores all the responses from the HTTP calls if needed.
+
+The wordlists are created based on the following:
+- User / passwords wordlists based on some common parameter names
+- Authoization headers wordlists
+   - The `Basic` auth header is also decoded from base64 and stored in the user/password/combo and authorization headers wordlists
+- Path wordlist based on the path of the requests
+- Parameters wordlist based on the parameters of the requests (GET / BODY)
+- Wordlists based on the resouces requested (js, css, etc...)
+
+![Wordlists examples](wordlists_example.png)
