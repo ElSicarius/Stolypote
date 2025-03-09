@@ -51,22 +51,23 @@ chmod +x start.sh
 
 ```
 
-Then start everything with your domain name and port ranges:
+Then start everything with your domain name and port ranges. Register a DNS record A for any subdomain/domain you like to point to your honeypot, then use
 
 ```bash
-./start.sh -p "80,443,9999" -d "example.com"
+./start.sh -p "80,443,9999" -d "example.com" -d "subdomain.example.com"
 
 ```
 
 ```bash
-./start.sh -f ports/top1000.txt -d "example.com"
+./start.sh -f ports/top1000.txt -d "example.com" -d "subdomain.example.com"
 
 ```
 
 ```bash
-./start.sh -p "20-65534" -d "example.com"
+./start.sh -p "20-65534" -d "example.com" -d "subdomain.example.com"
 
 ```
+Remember that HTTPS it will not work if you don't specify a domain that has a DNS record pointing to your honeypot.
 
 # Outputs
 
