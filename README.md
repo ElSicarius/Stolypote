@@ -69,6 +69,8 @@ Then start everything with your domain name and port ranges. Register a DNS reco
 ```
 Remember that HTTPS it will not work if you don't specify a domain that has a DNS record pointing to your honeypot.
 
+You can have 10 domains/subdomains pointing to the same server and the honeypot will listen on all of them and set HTTPs for all the domains.
+
 # Outputs
 
 The tool creates his wordlists and logs in the `wordlists` folder.
