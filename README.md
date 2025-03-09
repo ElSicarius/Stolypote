@@ -85,3 +85,12 @@ The wordlists are created based on the following:
 - Wordlists based on the resouces requested (js, css, etc...)
 
 ![Wordlists examples](wordlists_example.png)
+
+# Known errors
+
+Sometimes, docker will freak out and throw 
+```
+Error response from daemon: invalid mount config for type "volume": invalid mount path : ']' mount path must be absolute
+``` 
+when trying to mount the wordlists folder. 
+To be honnest, I don't know why this bug occurs sometimes. The fix is simple: just restart the stack using the start script.
